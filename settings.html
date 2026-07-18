@@ -86,7 +86,7 @@
     coinbase tag, read from blocks this browser fetched and verified itself. When a chain split appears on the
     Watch page, this is each arm's form guide.</p>
   <div class="row" style="margin:0 0 .8rem"><select id="pool-epoch" style="display:none"></select></div>
-  <div id="poolleague"><span class="empty">No blocks scanned yet — leave the Watch page open; recent best-chain blocks are fetched and classified in the background.</span></div>
+  <div id="poolleague"><span class="empty">No blocks scanned yet — new blocks are fetched, verified and classified in the background while this page (or the Watch page) is open.</span></div>
 
   <h2>Witnesses</h2>
   <p class="h2note">Which NIP-333 publishers and relays the Watch page polls (one per line). Explorer witnesses
@@ -182,6 +182,62 @@ function renderLeague() {
     a sample from your watching, not a census. Higher per-block = the pool's policy admits more oversize datacarrier.</p>`;
 }
 $('pool-epoch').addEventListener('change', (e) => { epochChoice = Number(e.target.value); renderLeague(); });
+
+// ---- self-sufficient scanning: Settings drives the same scan-worker the
+// Watch page uses, so the league keeps filling in with just this tab open.
+// Candidate hashes come from esplora tips; the worker re-verifies both the
+// bytes (hash) and the header's proof-of-work, so nothing is taken on faith.
+// Cross-tab dedupe: the ledger is re-read fresh before every enqueue, and
+// entries are keyed by hash, so a race with the Watch tab is harmless.
+const readLedger = () => { try { return JSON.parse(localStorage.getItem('forkwatch.classified') || '{}'); } catch { return {}; } };
+const SCAN_CAP = 6000;
+function recordScan(hash, entry) {
+  const led = readLedger();
+  led[hash] = entry;
+  const keys = Object.keys(led);
+  if (keys.length > SCAN_CAP) {
+    keys.map((k) => [k, led[k][0]]).sort((a, b) => a[1] - b[1])
+      .slice(0, keys.length - SCAN_CAP).forEach(([k]) => delete led[k]);
+  }
+  try { localStorage.setItem('forkwatch.classified', JSON.stringify(led)); } catch {}
+}
+const scanQueue = [];
+const scanPending = new Set();
+let scanReady = false, scanBusy = false;
+const scanner = new Worker('./scan-worker.js', { type: 'module' });
+scanner.postMessage({ type: 'init' });
+scanner.onmessage = (ev) => {
+  const m = ev.data;
+  if (m.type === 'ready') { scanReady = true; pumpScan(); return; }
+  scanBusy = false;
+  scanPending.delete(m.hash);
+  if (m.type === 'scanned') { recordScan(m.hash, [m.height, m.pool || null, m.nonStd || 0]); renderLeague(); }
+  pumpScan();
+};
+function pumpScan() {
+  if (!scanReady || scanBusy || !scanQueue.length) return;
+  scanBusy = true;
+  scanner.postMessage({ type: 'scan', ...scanQueue.shift() });
+}
+async function sweepTip() {
+  for (const base of ['https://mempool.space/api', 'https://blockstream.info/api']) {
+    try {
+      const r = await fetch(`${base}/blocks`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) continue;
+      const blocks = await r.json();
+      const led = readLedger(); // fresh read — dedupes against a scanning Watch tab
+      for (const b of blocks) {
+        if (!/^[0-9a-f]{64}$/.test(b.id) || led[b.id] || scanPending.has(b.id)) continue;
+        scanPending.add(b.id);
+        scanQueue.push({ hash: b.id, height: b.height });
+      }
+      pumpScan();
+      return;
+    } catch { /* next source */ }
+  }
+}
+sweepTip();
+setInterval(sweepTip, 60000);
 
 // ---- witness config ----
 function loadForm() {

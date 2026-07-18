@@ -39,6 +39,8 @@ self.onmessage = async (ev) => {
       const bytes = await fetchRaw(m.hash);
       if (bytes.length < 80 || reverseHex(dsha256(bytes.subarray(0, 80))) !== m.hash) throw new Error('bytes do not match requested hash');
       const block = codec.decode('Block', bytesToHex(bytes));
+      // self-verify even when the hash came from an explorer, not the PoW-checked tree
+      if (!codec.checkProofOfWork(block.header)) throw new Error('header fails proof-of-work');
       self.postMessage({ type: 'scanned', hash: m.hash, height: m.height, ...scanBlock(block) });
     }
   } catch (e) {
