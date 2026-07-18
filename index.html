@@ -30,6 +30,10 @@
   header.nav .brand { font-size: 1.15rem; font-weight: 600; color: var(--fg); }
   header.nav .brand .dot { color: var(--accent); }
   header.nav .brand:hover { text-decoration: none; }
+  header.nav .menu { display: flex; gap: .3rem; margin-left: .4rem; }
+  header.nav .menu a { color: var(--muted); font-size: .84rem; padding: .25rem .6rem; border-radius: 6px; }
+  header.nav .menu a:hover { color: var(--fg); background: #ffffff0d; text-decoration: none; }
+  header.nav .menu a.active { color: var(--fg); background: #ffffff14; }
   header.nav .sib { color: var(--muted); font-size: .8rem; }
   header.nav .spacer { flex: 1; }
   header.nav .status { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: .45rem; }
@@ -70,6 +74,10 @@
 <body>
 <header class="nav">
   <a class="brand" href="./">fork<span class="dot">·</span>watch</a>
+  <nav class="menu">
+    <a href="./" class="active">Watch</a>
+    <a href="./settings.html">Settings</a>
+  </nav>
   <span class="sib">a sibling of <a href="https://bitcoin-kernel.com/health/">block·health</a></span>
   <span class="spacer"></span>
   <span class="status"><span class="pulse" id="pulse"></span><span id="statusText">starting…</span></span>
@@ -285,12 +293,65 @@ if (CFG.webrtc?.signalUrl) {
   witness.start();
 }
 
+// ---- miner-league scanner ----
+// Recent best-chain blocks are fetched (verified by hash), decoded off-thread,
+// and recorded as {hash: [height, pool, nonStd]} — Settings ranks pools per
+// 2016-block epoch by non-standard OP_RETURNs included.
+let scanLedger = {};
+try { scanLedger = JSON.parse(localStorage.getItem('forkwatch.classified') || '{}'); } catch {}
+const SCAN_CAP = 6000;
+let ledgerTimer = null;
+function saveLedger() {
+  clearTimeout(ledgerTimer);
+  ledgerTimer = setTimeout(() => {
+    const keys = Object.keys(scanLedger);
+    if (keys.length > SCAN_CAP) {
+      keys.map((k) => [k, scanLedger[k][0]]).sort((a, b) => a[1] - b[1])
+        .slice(0, keys.length - SCAN_CAP).forEach(([k]) => delete scanLedger[k]);
+    }
+    try { localStorage.setItem('forkwatch.classified', JSON.stringify(scanLedger)); } catch {}
+  }, 800);
+}
+const scanQueue = [];
+const scanPending = new Set();
+let scanReady = false, scanBusy = false;
+const scanner = new Worker('./scan-worker.js', { type: 'module' });
+scanner.postMessage({ type: 'init' });
+scanner.onmessage = (ev) => {
+  const m = ev.data;
+  if (m.type === 'ready') { scanReady = true; pumpScan(); return; }
+  scanBusy = false;
+  scanPending.delete(m.hash);
+  if (m.type === 'scanned') { scanLedger[m.hash] = [m.height, m.pool || null, m.nonStd || 0]; saveLedger(); }
+  pumpScan();
+};
+function pumpScan() {
+  if (!scanReady || scanBusy || !scanQueue.length) return;
+  scanBusy = true;
+  scanner.postMessage({ type: 'scan', ...scanQueue.shift() });
+}
+// sweep: the newest 24 best-chain blocks not yet scanned
+function sweepScan() {
+  let hash = tree.bestHash;
+  for (let i = 0; i < 24 && hash; i++) {
+    const n = tree.node(hash);
+    if (!n) break;
+    if (!scanLedger[hash] && !scanPending.has(hash)) {
+      scanPending.add(hash);
+      scanQueue.push({ hash, height: n.height });
+    }
+    hash = n.prev;
+  }
+  pumpScan();
+}
+
 // ---- slow-block watch ----
 setInterval(() => {
   const b = tree.best;
   if (b && b.time && Date.now() / 1000 - b.time > 3600) {
     logEvent({ type: 'slow', hash: tree.bestHash, height: b.height, minutes: Math.round((Date.now() / 1000 - b.time) / 60) }, 'clock');
   }
+  sweepScan();
   renderStats(); renderSources(); renderTimeline();
 }, 30000);
 
@@ -343,7 +404,7 @@ function renderTimeline() {
 // ---- go ----
 setStatus('fetching tips…');
 renderStats(); renderTimeline();
-pollNostr(); pollEsplora();
+pollNostr(); pollEsplora().then(sweepScan);
 setInterval(pollNostr, 30000);
 setInterval(pollEsplora, 60000);
 setInterval(() => { tree.prune(); tree.save(); }, 120000);

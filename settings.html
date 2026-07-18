@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>settings — fork·watch</title>
+<meta name="description" content="fork·watch settings: the miner league (non-standard datacarrier by pool, per difficulty epoch) and witness configuration.">
+<link rel="canonical" href="https://bitcoin-kernel.com/forks/settings.html">
+<meta name="theme-color" content="#1a1214">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%231a1214'/%3E%3Cpath d='M16 26V16M16 16L9 8M16 16l7-8' stroke='%23f7931a' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='7' r='2.6' fill='%23dc3545'/%3E%3Ccircle cx='23' cy='7' r='2.6' fill='%232fbf6b'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #141117; --nav-bg: #201b25; --panel-bg: #262030; --stat-box-bg: #100d13;
+    --border: #363043; --fg: #ffffff; --muted: #988fa8; --link: #00ddff; --accent: #f7931a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
+  header.nav { display: flex; align-items: center; gap: .4rem; padding: .85rem 1.4rem;
+    background: var(--nav-bg); border-bottom: 1px solid var(--border); }
+  header.nav .brand { font-size: 1.15rem; font-weight: 600; color: var(--fg); }
+  header.nav .brand:hover { text-decoration: none; }
+  header.nav .brand .dot { color: var(--accent); }
+  header.nav .menu { display: flex; gap: .3rem; margin-left: .4rem; }
+  header.nav .menu a { color: var(--muted); font-size: .84rem; padding: .25rem .6rem; border-radius: 6px; }
+  header.nav .menu a:hover { color: var(--fg); background: #ffffff0d; text-decoration: none; }
+  header.nav .menu a.active { color: var(--fg); background: #ffffff14; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 2.2rem 1.4rem 4rem; }
+  h1 { font-size: 1.8rem; margin: 0 0 .3rem; }
+  .tagline { color: var(--muted); font-size: .98rem; margin: 0 0 1.8rem; line-height: 1.5; }
+  h2 { font-size: 1.05rem; margin: 2.2rem 0 .3rem; }
+  .h2note { color: var(--muted); font-size: .8rem; margin: 0 0 1rem; line-height: 1.5; }
+  code { background: var(--stat-box-bg); padding: .12rem .4rem; border-radius: 4px; color: #cfe; font-size: .85em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table.league { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  table.league th { text-align: left; color: var(--muted); font-weight: 500; font-size: .68rem; text-transform: uppercase;
+    letter-spacing: .05em; padding: 0 .6rem .4rem; }
+  table.league th.num, table.league td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.league td { padding: .45rem .6rem; border-top: 1px solid var(--border); vertical-align: middle; }
+  table.league tr:first-child td { border-top: none; }
+  table.league .rank { color: var(--muted); font-variant-numeric: tabular-nums; width: 1.6rem; }
+  table.league .share { width: 36%; }
+  table.league .bar { height: 8px; border-radius: 4px; background: #100d1399; overflow: hidden; box-shadow: inset 0 0 0 1px #ffffff10; }
+  table.league .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+  .panel { background: var(--panel-bg); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 1.3rem; }
+  label { display: block; font-size: .82rem; color: var(--muted); margin: .9rem 0 .3rem; }
+  label:first-child { margin-top: 0; }
+  input[type=text], textarea { width: 100%; background: var(--stat-box-bg); border: 1px solid var(--border);
+    color: var(--fg); border-radius: 8px; padding: .6rem .7rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .82rem; resize: vertical; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--link); }
+  select { background: var(--stat-box-bg); border: 1px solid var(--border); color: var(--fg); border-radius: 8px;
+    padding: .45rem .6rem; font: inherit; font-size: .82rem; }
+  .hint { font-size: .74rem; color: var(--muted); margin-top: .3rem; }
+  .row { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.1rem; align-items: center; }
+  button { font: inherit; font-size: .85rem; font-weight: 600; padding: .55rem 1.1rem; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--stat-box-bg); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #201400; }
+  button:hover { filter: brightness(1.08); }
+  .saved { color: #6fe6a0; font-size: .82rem; opacity: 0; transition: opacity .2s; }
+  .saved.show { opacity: 1; }
+  .empty { color: var(--muted); font-size: .9rem; padding: .5rem 0; }
+  footer { color: var(--muted); font-size: .8rem; margin-top: 2.6rem; border-top: 1px solid var(--border); padding-top: 1.2rem; line-height: 1.6; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="./">fork<span class="dot">·</span>watch</a>
+  <nav class="menu">
+    <a href="./">Watch</a>
+    <a href="./settings.html" class="active">Settings</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <h1>Settings</h1>
+  <p class="tagline">The miner league from your scanned blocks, and which witnesses the Watch page follows.
+    Everything stays in your browser — nothing is sent anywhere.</p>
+
+  <h2>Miner league <span style="font-size:.7rem;color:var(--muted);font-weight:400">— non-standard datacarrier by pool, per 2016-block epoch</span></h2>
+  <p class="h2note">Which pools include the most OP_RETURNs over the 80/83-byte standard — an inclusion-policy
+    scoreboard, ranked per block mined so hashrate share doesn't decide the table. Attribution is the pool's own
+    coinbase tag, read from blocks this browser fetched and verified itself. When a chain split appears on the
+    Watch page, this is each arm's form guide.</p>
+  <div class="row" style="margin:0 0 .8rem"><select id="pool-epoch" style="display:none"></select></div>
+  <div id="poolleague"><span class="empty">No blocks scanned yet — leave the Watch page open; recent best-chain blocks are fetched and classified in the background.</span></div>
+
+  <h2>Witnesses</h2>
+  <p class="h2note">Which NIP-333 publishers and relays the Watch page polls (one per line). Explorer witnesses
+    (mempool.space, blockstream.info) are always on. Mesh witnesses join via a
+    <code>?peer=wss://…&amp;room=…</code> link, or set them here. Changes apply when the Watch page reloads.</p>
+  <div class="panel">
+    <label for="pubs">Publisher public keys <span style="opacity:.7">(64-char hex, one per line)</span></label>
+    <textarea id="pubs" rows="2" spellcheck="false" placeholder="cccccc0a…"></textarea>
+    <div class="hint" id="pubs-hint"></div>
+
+    <label for="relays">Relays <span style="opacity:.7">(one wss:// URL per line)</span></label>
+    <textarea id="relays" rows="3" spellcheck="false" placeholder="wss://relay.damus.io"></textarea>
+    <div class="hint" id="relays-hint"></div>
+
+    <label for="sig">Mesh signaling server <span style="opacity:.7">(wss:// …/.webrtc — optional)</span></label>
+    <input type="text" id="sig" spellcheck="false" autocomplete="off" placeholder="wss://your.pod/.webrtc">
+    <label for="room">Mesh room</label>
+    <input type="text" id="room" spellcheck="false" autocomplete="off" placeholder="b17c0100b10c48ea1710 (hex, 8–128 chars)">
+
+    <div class="row">
+      <button class="primary" id="save">Save</button>
+      <button id="reset">Reset to defaults</button>
+      <span class="saved" id="saved">saved ✓</span>
+    </div>
+  </div>
+
+  <footer>
+    Config and the scan ledger live only in this browser's <code>localStorage</code>. Pool attribution is the
+    miner's own coinbase stamp; blocks are verified by hash before they're counted — a lying explorer convicts itself.
+  </footer>
+</div>
+
+<script type="module">
+const DEFAULT_PUBLISHERS = ['cccccc0a8338a4aba51691f309f2f892c6c58f655a1ec3fc30522c894c166d9c'];
+const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+const EPOCH = 2016;
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n).toLocaleString('en-US');
+
+function readCfg() { try { return JSON.parse(localStorage.getItem('forkwatch.config') || '{}'); } catch { return {}; } }
+function writeCfg(cfg) { try { localStorage.setItem('forkwatch.config', JSON.stringify(cfg)); } catch {} }
+
+// ---- miner league (ledger written by the Watch page's scanner) ----
+// entry: hash -> [height, pool|null, nonStd]
+let epochChoice = null;
+function renderLeague() {
+  let led = {};
+  try { led = JSON.parse(localStorage.getItem('forkwatch.classified') || '{}'); } catch {}
+  const entries = Object.values(led);
+  const el = $('poolleague'), sel = $('pool-epoch');
+  if (!entries.length) { sel.style.display = 'none'; return; }
+  sel.style.display = '';
+
+  const byEpoch = new Map();
+  for (const e of entries) {
+    const ep = Math.floor(e[0] / EPOCH);
+    if (!byEpoch.has(ep)) byEpoch.set(ep, []);
+    byEpoch.get(ep).push(e);
+  }
+  const epochs = [...byEpoch.keys()].sort((a, b) => b - a);
+  const sig = epochs.join(',');
+  if (sel.dataset.epochs !== sig) {
+    sel.dataset.epochs = sig;
+    sel.innerHTML = epochs.map((ep) => `<option value="${ep}">epoch ${fmt(ep)} · blocks #${fmt(ep * EPOCH)}–#${fmt(ep * EPOCH + EPOCH - 1)}</option>`).join('');
+  }
+  if (epochChoice == null || !byEpoch.has(epochChoice)) epochChoice = epochs[0];
+  sel.value = String(epochChoice);
+
+  const pools = new Map();
+  for (const e of byEpoch.get(epochChoice)) {
+    const name = e[1] || 'unrecognised';
+    const p = pools.get(name) || { blocks: 0, ns: 0 };
+    p.blocks++; p.ns += e[2] || 0;
+    pools.set(name, p);
+  }
+  const rows = [...pools.entries()]
+    .map(([name, p]) => ({ name, ...p, rate: p.ns / p.blocks }))
+    .sort((a, b) => b.rate - a.rate || b.ns - a.ns || b.blocks - a.blocks);
+  const maxNs = Math.max(1, ...rows.map((r) => r.ns));
+  const covered = byEpoch.get(epochChoice).length;
+
+  el.innerHTML = `<table class="league"><thead><tr><th class="rank">#</th><th>pool</th><th class="num">blocks</th>
+    <th class="num">non-std</th><th class="num">per block</th><th class="share">share</th></tr></thead><tbody>
+    ${rows.map((r, i) => `<tr>
+      <td class="rank">${i + 1}</td>
+      <td><b>⛏ ${r.name}</b></td>
+      <td class="num">${fmt(r.blocks)}</td>
+      <td class="num"><b>${fmt(r.ns)}</b></td>
+      <td class="num">${r.rate.toFixed(1)}</td>
+      <td class="share"><div class="bar"><i style="width:${(100 * r.ns / maxNs).toFixed(1)}%"></i></div></td>
+    </tr>`).join('')}</tbody></table>
+    <p class="h2note" style="margin-top:.6rem">${fmt(covered)} of ${fmt(EPOCH)} blocks in this epoch scanned —
+    a sample from your watching, not a census. Higher per-block = the pool's policy admits more oversize datacarrier.</p>`;
+}
+$('pool-epoch').addEventListener('change', (e) => { epochChoice = Number(e.target.value); renderLeague(); });
+
+// ---- witness config ----
+function loadForm() {
+  const cfg = readCfg();
+  $('pubs').value = (Array.isArray(cfg.publishers) && cfg.publishers.length ? cfg.publishers : DEFAULT_PUBLISHERS).join('\n');
+  $('relays').value = (Array.isArray(cfg.relays) && cfg.relays.length ? cfg.relays : DEFAULT_RELAYS).join('\n');
+  $('sig').value = cfg.webrtc?.signalUrl || '';
+  $('room').value = cfg.webrtc?.room || '';
+  validate();
+}
+function parseForm() {
+  return {
+    pubs: $('pubs').value.split('\n').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    relays: $('relays').value.split('\n').map((s) => s.trim()).filter(Boolean),
+    sig: $('sig').value.trim(),
+    room: $('room').value.trim(),
+  };
+}
+function validate() {
+  const { pubs, relays } = parseForm();
+  const badPub = pubs.find((p) => !/^[0-9a-f]{64}$/.test(p));
+  const badRelay = relays.find((r) => !/^wss?:\/\/.+/.test(r));
+  $('pubs-hint').textContent = badPub ? `Not 64-char hex: ${badPub.slice(0, 24)}…` : `${pubs.length} publisher${pubs.length === 1 ? '' : 's'}.`;
+  $('relays-hint').textContent = relays.length === 0 ? 'Add at least one relay.' : badRelay ? `Not a wss:// URL: ${badRelay}` : `${relays.length} relay${relays.length === 1 ? '' : 's'}.`;
+  return !badPub && !badRelay && pubs.length > 0 && relays.length > 0;
+}
+$('pubs').addEventListener('input', validate);
+$('relays').addEventListener('input', validate);
+$('save').addEventListener('click', () => {
+  if (!validate()) return;
+  const { pubs, relays, sig, room } = parseForm();
+  const cfg = readCfg();
+  if (JSON.stringify(pubs) !== JSON.stringify(DEFAULT_PUBLISHERS)) cfg.publishers = pubs; else delete cfg.publishers;
+  if (JSON.stringify(relays) !== JSON.stringify(DEFAULT_RELAYS)) cfg.relays = relays; else delete cfg.relays;
+  if (sig && /^wss?:\/\//.test(sig)) {
+    cfg.webrtc = { ...cfg.webrtc, signalUrl: sig }; // keep TURN fields a peering link may have set
+    if (room && /^[a-f0-9]{8,128}$/i.test(room)) cfg.webrtc.room = room.toLowerCase(); else delete cfg.webrtc.room;
+  } else delete cfg.webrtc;
+  writeCfg(cfg);
+  $('saved').classList.add('show'); setTimeout(() => $('saved').classList.remove('show'), 1600);
+});
+$('reset').addEventListener('click', () => {
+  localStorage.removeItem('forkwatch.config');
+  loadForm();
+  $('saved').classList.add('show'); setTimeout(() => $('saved').classList.remove('show'), 1600);
+});
+
+// live refresh while the Watch page scans in another tab
+window.addEventListener('storage', (e) => { if (e.key === 'forkwatch.classified') renderLeague(); });
+setInterval(renderLeague, 5000);
+loadForm();
+renderLeague();
+</script>
+</body>
+</html>
