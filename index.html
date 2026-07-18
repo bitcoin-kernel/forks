@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fork·watch — Bitcoin fork &amp; stale block monitor, verified in your browser</title>
+<meta name="description" content="Watches Bitcoin chain tips from nostr publishers, explorers and mesh peers, verifies every header locally, and records forks, reorgs and stale blocks. No trusted server.">
+<link rel="canonical" href="https://bitcoin-kernel.com/forks/">
+<meta name="theme-color" content="#1a1214">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="fork·watch">
+<meta property="og:title" content="fork·watch — Bitcoin fork &amp; stale block monitor">
+<meta property="og:description" content="Chain tips from many independent sources, re-verified in your browser; forks, reorgs and stale blocks recorded as they happen.">
+<meta property="og:url" content="https://bitcoin-kernel.com/forks/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%231a1214'/%3E%3Cpath d='M16 26V16M16 16L9 8M16 16l7-8' stroke='%23f7931a' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='7' r='2.6' fill='%23dc3545'/%3E%3Ccircle cx='23' cy='7' r='2.6' fill='%232fbf6b'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #141117; --nav-bg: #201b25; --panel-bg: #262030; --stat-box-bg: #100d13;
+    --border: #363043; --fg: #ffffff; --muted: #988fa8; --link: #00ddff; --accent: #f7931a;
+    --good: #2fbf6b; --warn: #e0a80f; --bad: #dc3545;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
+  header.nav { display: flex; align-items: baseline; gap: .9rem; flex-wrap: wrap; padding: .85rem 1.4rem;
+    background: var(--nav-bg); border-bottom: 1px solid var(--border); }
+  header.nav .brand { font-size: 1.15rem; font-weight: 600; color: var(--fg); }
+  header.nav .brand .dot { color: var(--accent); }
+  header.nav .brand:hover { text-decoration: none; }
+  header.nav .sib { color: var(--muted); font-size: .8rem; }
+  header.nav .spacer { flex: 1; }
+  header.nav .status { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: .45rem; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .pulse.live { background: var(--good); box-shadow: 0 0 8px var(--good); animation: breathe 2.2s ease-in-out infinite; }
+  .pulse.err { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .wrap { padding: 1.5rem 1.4rem 3rem; max-width: 1100px; margin: 0 auto; }
+  .lede { color: var(--muted); font-size: .9rem; line-height: 1.55; max-width: 68ch; margin: 0 0 1.6rem; }
+  .stats { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .stat { background: var(--stat-box-bg); border: 1px solid var(--border); border-radius: 8px; padding: .7rem 1rem; min-width: 130px; }
+  .stat .k { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-size: 1.4rem; font-weight: 600; margin-top: .15rem; font-variant-numeric: tabular-nums; }
+  .stat .v small { display: block; font-size: .62rem; color: var(--muted); font-weight: 400; }
+  .stat .v.good { color: #46d585; } .stat .v.warn { color: var(--warn); } .stat .v.bad { color: #ff8a94; }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 2rem 0 .8rem; font-weight: 600; }
+  table.src { width: 100%; border-collapse: collapse; font-size: .84rem; background: var(--panel-bg);
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  table.src th, table.src td { text-align: left; padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
+  table.src th { color: var(--muted); font-weight: 500; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+  table.src tr:last-child td { border-bottom: none; }
+  td.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; }
+  .ok { color: #46d585; } .div { color: #ff8a94; font-weight: 600; } .dim { color: var(--muted); }
+  .timeline { display: flex; flex-direction: column; gap: .5rem; }
+  .ev { background: var(--panel-bg); border: 1px solid var(--border); border-left: 3px solid var(--muted);
+    border-radius: 8px; padding: .6rem .9rem; font-size: .84rem; line-height: 1.5; }
+  .ev .t { color: var(--muted); font-size: .7rem; margin-left: .5rem; font-variant-numeric: tabular-nums; }
+  .ev.stale, .ev.invalid-pow { border-left-color: var(--bad); }
+  .ev.fork, .ev.divergence, .ev.height-mismatch { border-left-color: var(--warn); }
+  .ev.slow { border-left-color: var(--border); color: var(--muted); }
+  .ev b { font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-size: .88rem; padding: 1.2rem; background: var(--panel-bg);
+    border: 1px dashed var(--border); border-radius: 10px; }
+  footer { color: var(--muted); font-size: .78rem; line-height: 1.6; margin-top: 3rem;
+    border-top: 1px solid var(--border); padding-top: 1.2rem; }
+</style>
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="./">fork<span class="dot">·</span>watch</a>
+  <span class="sib">a sibling of <a href="https://bitcoin-kernel.com/health/">block·health</a></span>
+  <span class="spacer"></span>
+  <span class="status"><span class="pulse" id="pulse"></span><span id="statusText">starting…</span></span>
+</header>
+
+<div class="wrap">
+  <p class="lede">
+    Chain tips observed from independent witnesses — nostr publishers, block explorers, and
+    <a href="https://bitcoin-kernel.com/health/">block·health</a> browsers on the WebRTC mesh — every header
+    re-verified locally (proof-of-work, linkage, cumulative work). When witnesses disagree, when the chain
+    splits, when blocks go stale: it's recorded here, with the evidence kept. No trusted server.
+  </p>
+
+  <div class="stats">
+    <div class="stat"><div class="k">best tip</div><div class="v" id="s-tip">—</div></div>
+    <div class="stat"><div class="k">headers tracked</div><div class="v" id="s-hdrs">0</div></div>
+    <div class="stat" title="distinct non-stale chain tips near the best height — more than 1 means an unresolved fork"><div class="k">live tips</div><div class="v" id="s-tips">—</div></div>
+    <div class="stat"><div class="k">stale blocks seen</div><div class="v" id="s-stale">0</div></div>
+    <div class="stat"><div class="k">witnesses agreeing</div><div class="v" id="s-agree">—</div></div>
+    <div class="stat"><div class="k">last block</div><div class="v" id="s-age">—</div></div>
+  </div>
+
+  <h2>witnesses</h2>
+  <div id="sources"><div class="empty">Waiting for the first tips…</div></div>
+
+  <h2>event timeline</h2>
+  <div class="timeline" id="timeline"><div class="empty">Nothing observed yet — which, for a fork monitor, is good news. Reorgs and stale blocks will appear here as they happen and persist across sessions.</div></div>
+
+  <footer>
+    Headers are self-certifying: proof-of-work and linkage are checked locally on every observation, so a lying
+    witness convicts itself. Peer via the same <code>?peer=wss://…&amp;room=…</code> link as block·health to add
+    mesh witnesses. Static files on GitHub Pages — no backend, nothing trusted.
+  </footer>
+</div>
+
+<script type="module">
+import { Codec } from './engine/codec/codec.js';
+import { verifyNostrEvent } from './engine/codec/nostr.js';
+import { HeaderEngine } from './engine/codec/headers.js';
+import { HeaderTree, splitHeaders } from './header-tree.js';
+import { PeerWitness } from './peer-witness.js';
+
+const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
+const DEFAULT_PUBLISHERS = ['cccccc0a8338a4aba51691f309f2f892c6c58f655a1ec3fc30522c894c166d9c'];
+const KIND = 33333, NETWORK = 'btc', HEADER_HEX = 160;
+const ESPLORA = [
+  ['esplora:mempool.space', 'https://mempool.space/api'],
+  ['esplora:blockstream.info', 'https://blockstream.info/api'],
+];
+
+let CFG = {};
+try { CFG = JSON.parse(localStorage.getItem('forkwatch.config') || '{}'); } catch {}
+{ // shareable peering, identical semantics to block·health
+  const qs = new URLSearchParams(location.search);
+  const qPeer = qs.get('peer'), qRoom = qs.get('room');
+  if (qPeer && /^wss?:\/\//.test(qPeer)) {
+    const w = { signalUrl: qPeer };
+    if (qRoom && /^[a-f0-9]{8,128}$/.test(qRoom)) w.room = qRoom;
+    const qTurn = qs.get('turn');
+    if (qTurn && /^turns?:/.test(qTurn)) { w.turn = qTurn; const tu = qs.get('tu'), tc = qs.get('tc'); if (tu) w.turnUser = tu; if (tc) w.turnCred = tc; }
+    CFG = { ...CFG, webrtc: w };
+    try { localStorage.setItem('forkwatch.config', JSON.stringify(CFG)); } catch {}
+  }
+}
+const PUBLISHERS = (Array.isArray(CFG.publishers) && CFG.publishers.length ? CFG.publishers : DEFAULT_PUBLISHERS)
+  .filter((p) => /^[0-9a-f]{64}$/.test(p));
+const RELAYS = (Array.isArray(CFG.relays) && CFG.relays.length ? CFG.relays : DEFAULT_RELAYS).filter((r) => /^wss?:\/\//.test(r));
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n).toLocaleString('en-US');
+const short = (h) => h ? `${h.slice(0, 4)}…${h.slice(-6)}` : '—';
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ago = (ms) => { const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  return s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${(s / 3600).toFixed(1)}h ago` : `${Math.round(s / 86400)}d ago`; };
+const setStatus = (text, cls) => { $('statusText').textContent = text; $('pulse').className = 'pulse' + (cls ? ' ' + cls : ''); };
+
+// ---- engine + tree ----
+const jl = (n) => fetch(`./engine/schema/${n}.jsonld`).then((r) => r.json());
+const [core, proof, p2p, chainS, validateS] = await Promise.all([jl('core'), jl('proof'), jl('p2p'), jl('chain'), jl('validate')]);
+const codec = new Codec(core, proof, p2p);
+const engine = HeaderEngine.fromSchemas(codec, chainS, validateS, 'btc:mainnet');
+const tree = new HeaderTree({ codec, engine });
+
+// ---- event log (persistent) ----
+let events = [];
+try { events = JSON.parse(localStorage.getItem('forkwatch.events') || '[]'); } catch {}
+const seenEvents = new Set(events.map((e) => e.key));
+let saveTimer = null;
+function persist() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem('forkwatch.events', JSON.stringify(events.slice(0, 500))); } catch {}
+    tree.save();
+  }, 800);
+}
+function logEvent(ev, source) {
+  const key = ev.type === 'stale' ? `stale:${ev.newTip}:${ev.depth}`
+    : ev.type === 'fork' ? `fork:${ev.parent}`
+    : ev.type === 'invalid-pow' ? `pow:${ev.hash}`
+    : ev.type === 'height-mismatch' ? `hm:${ev.hash}`
+    : ev.type === 'divergence' ? `div:${ev.source}:${ev.hash}`
+    : ev.type === 'slow' ? `slow:${ev.hash}` : JSON.stringify(ev);
+  if (seenEvents.has(key)) return;
+  seenEvents.add(key);
+  events.unshift({ key, ts: Date.now(), source, ...ev });
+  if (events.length > 500) events.length = 500;
+  persist(); renderTimeline(); renderStats();
+}
+
+// ---- witnesses (source tip registry) ----
+const sources = new Map(); // name -> { kind, height, hash, at }
+function noteTip(name, kind, height, hash) {
+  sources.set(name, { kind, height, hash, at: Date.now() });
+  detectDivergence(name);
+  renderSources(); renderStats();
+}
+function onBestChain(hash) {
+  return tree.node(hash) ? (hash === tree.bestHash || tree.isAncestor(hash, tree.bestHash)) : false;
+}
+function detectDivergence(name) {
+  const s = sources.get(name);
+  const best = tree.best;
+  if (!s || !best || !tree.node(s.hash)) return;
+  if (s.height >= best.height - 1 && !onBestChain(s.hash)) {
+    logEvent({ type: 'divergence', source: name, hash: s.hash, height: s.height, bestHash: tree.bestHash, bestHeight: best.height }, name);
+  }
+}
+function ingest(hexes, startHeight, source) {
+  const { events: evs } = tree.addBatch(hexes, startHeight, source);
+  for (const ev of evs) logEvent(ev, source);
+  if (evs.length) for (const name of sources.keys()) detectDivergence(name);
+  persist(); renderStats();
+}
+
+// ---- source 1: nostr publishers ----
+function fetchFromRelay(url, pubkey) {
+  return new Promise((resolve) => {
+    let ws; let newest = null;
+    const done = (v) => { clearTimeout(t); try { ws?.close(); } catch {} resolve(v); };
+    const t = setTimeout(() => done(newest), 8000);
+    try { ws = new WebSocket(url); } catch { return done(null); }
+    ws.onopen = () => ws.send(JSON.stringify(['REQ', 'fw', { kinds: [KIND], authors: [pubkey], '#d': [NETWORK], limit: 1 }]));
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m[0] === 'EVENT') {
+        const e = m[2];
+        const d = e.tags?.find((tg) => tg[0] === 'd')?.[1];
+        if (e.kind === KIND && e.pubkey === pubkey && d === NETWORK && (!newest || e.created_at > newest.created_at)) newest = e;
+      } else if (m[0] === 'EOSE') done(newest);
+    };
+    ws.onerror = () => done(newest);
+    ws.onclose = () => done(newest);
+  });
+}
+async function pollNostr() {
+  await Promise.allSettled(PUBLISHERS.map(async (pk) => {
+    const evs = await Promise.allSettled(RELAYS.map((r) => fetchFromRelay(r, pk)));
+    const best = evs.map((x) => x.value).filter(Boolean).filter(verifyNostrEvent)
+      .reduce((a, b) => (!a || b.created_at > a.created_at ? b : a), null);
+    if (!best) return;
+    const c = best.content || '';
+    if (!/^[0-9a-f]+$/.test(c) || c.length % HEADER_HEX !== 0) return;
+    const tip = parseInt(best.tags.find((tg) => tg[0] === 'tip')?.[1] ?? '', 10);
+    if (!Number.isFinite(tip)) return;
+    const hexes = splitHeaders(c);
+    const name = `nostr:${pk.slice(0, 8)}`;
+    ingest(hexes, tip - hexes.length + 1, name);
+    const last = hexes[hexes.length - 1];
+    noteTip(name, 'nostr', tip, codec.blockHash(codec.decode('BlockHeader', last)));
+  }));
+  if (tree.best) setStatus('watching · tip #' + fmt(tree.best.height), 'live');
+  else setStatus('no tips observed yet', 'err');
+}
+
+// ---- source 2: esplora explorers ----
+async function pollEsplora() {
+  await Promise.allSettled(ESPLORA.map(async ([name, base]) => {
+    const r = await fetch(`${base}/blocks`, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return;
+    const blocks = await r.json(); // newest ~10, descending
+    if (!Array.isArray(blocks) || !blocks.length) return;
+    for (const b of blocks.slice().reverse()) {
+      if (!/^[0-9a-f]{64}$/.test(b.id) || tree.node(b.id)) continue;
+      const hr = await fetch(`${base}/block/${b.id}/header`, { signal: AbortSignal.timeout(15000) });
+      if (!hr.ok) continue;
+      const hex = (await hr.text()).trim();
+      const { events: evs } = tree.add(hex, b.height, name);
+      for (const ev of evs) logEvent(ev, name);
+    }
+    noteTip(name, 'esplora', blocks[0].height, blocks[0].id);
+  }));
+}
+
+// ---- source 3: mesh witnesses (block·health browsers) ----
+let witness = null;
+if (CFG.webrtc?.signalUrl) {
+  const w = CFG.webrtc;
+  const iceServers = w.turn
+    ? [{ urls: 'stun:stun.l.google.com:19302' }, { urls: w.turn, ...(w.turnUser ? { username: w.turnUser, credential: w.turnCred || '' } : {}) }]
+    : undefined;
+  witness = new PeerWitness({
+    signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers,
+    onTip: async (id, tip) => {
+      const name = `peer:${String(id).slice(0, 8)}`;
+      if (!tree.node(tip.hash)) {
+        const r = await witness.requestHeaders(id, Math.max(0, tip.height - 23), 24);
+        if (r) ingest(splitHeaders(r.hex), r.start, name);
+      }
+      noteTip(name, 'peer', tip.height, tip.hash);
+    },
+    onStatus: () => renderSources(),
+  });
+  witness.start();
+}
+
+// ---- slow-block watch ----
+setInterval(() => {
+  const b = tree.best;
+  if (b && b.time && Date.now() / 1000 - b.time > 3600) {
+    logEvent({ type: 'slow', hash: tree.bestHash, height: b.height, minutes: Math.round((Date.now() / 1000 - b.time) / 60) }, 'clock');
+  }
+  renderStats(); renderSources(); renderTimeline();
+}, 30000);
+
+// ---- rendering ----
+function renderStats() {
+  const b = tree.best;
+  $('s-tip').innerHTML = b ? `#${fmt(b.height)} <small class="mono">${short(tree.bestHash)}</small>` : '—';
+  $('s-hdrs').textContent = fmt(tree.size);
+  const live = tree.liveTips().length;
+  const tipsEl = $('s-tips'); tipsEl.textContent = live || '—';
+  tipsEl.className = 'v' + (live > 1 ? ' warn' : live === 1 ? ' good' : '');
+  $('s-stale').textContent = fmt(events.filter((e) => e.type === 'stale').reduce((s, e) => s + e.depth, 0));
+  const named = [...sources.entries()];
+  const agree = named.filter(([, s]) => onBestChain(s.hash)).length;
+  const agEl = $('s-agree'); agEl.textContent = named.length ? `${agree} / ${named.length}` : '—';
+  agEl.className = 'v' + (named.length && agree < named.length ? ' warn' : named.length ? ' good' : '');
+  $('s-age').textContent = b && b.time ? ago(b.time * 1000) : '—';
+}
+function renderSources() {
+  const rows = [...sources.entries()].sort((a, b) => b[1].height - a[1].height || a[0].localeCompare(b[0]));
+  const meshN = witness ? witness.status().connected : 0;
+  if (!rows.length) { $('sources').innerHTML = '<div class="empty">Waiting for the first tips…</div>'; return; }
+  $('sources').innerHTML = `<table class="src"><tr><th>witness</th><th>tip</th><th>hash</th><th>seen</th><th>verdict</th></tr>
+    ${rows.map(([name, s]) => `<tr>
+      <td>${escapeHtml(name)}</td>
+      <td class="mono">#${fmt(s.height)}</td>
+      <td class="mono">${short(escapeHtml(s.hash))}</td>
+      <td class="dim">${ago(s.at)}</td>
+      <td>${tree.node(s.hash) ? (onBestChain(s.hash) ? '<span class="ok">✓ on best chain</span>' : '<span class="div">✗ divergent</span>') : '<span class="dim">unverified</span>'}</td>
+    </tr>`).join('')}</table>`
+    + (witness ? `<p class="dim" style="font-size:.78rem">mesh: ${meshN} peer${meshN === 1 ? '' : 's'} connected</p>` : '');
+}
+function renderTimeline() {
+  if (!events.length) return;
+  $('timeline').innerHTML = events.slice(0, 100).map((e) => {
+    const t = `<span class="t">${ago(e.ts)}</span>`;
+    switch (e.type) {
+      case 'stale': return `<div class="ev stale">⚠ <b>${e.depth}-block reorg</b> — ${e.arm.map((a) => '#' + fmt(a.height)).join(', ')} went stale
+        (${e.arm.map((a) => `<span class="mono">${short(a.hash)}</span>`).join(', ')}), tip now #${fmt(e.newHeight)} <span class="mono">${short(e.newTip)}</span>${t}</div>`;
+      case 'fork': return `<div class="ev fork">⑂ <b>chain split at #${fmt(e.height)}</b> — two arms from <span class="mono">${short(e.parent)}</span>${t}</div>`;
+      case 'divergence': return `<div class="ev divergence">△ <b>${escapeHtml(e.source)}</b> tip #${fmt(e.height)} <span class="mono">${short(e.hash)}</span> is not on the best chain${t}</div>`;
+      case 'invalid-pow': return `<div class="ev invalid-pow">✕ <b>${escapeHtml(e.source || '?')}</b> offered a header failing its own proof-of-work${t}</div>`;
+      case 'height-mismatch': return `<div class="ev height-mismatch">△ <b>${escapeHtml(e.source || '?')}</b> claimed height ${fmt(e.claimed)} for <span class="mono">${short(e.hash)}</span>; the chain says ${fmt(e.actual)}${t}</div>`;
+      case 'slow': return `<div class="ev slow">◷ ${e.minutes} minutes without a block at #${fmt(e.height)}${t}</div>`;
+      default: return `<div class="ev">${escapeHtml(e.type)}${t}</div>`;
+    }
+  }).join('');
+}
+
+// ---- go ----
+setStatus('fetching tips…');
+renderStats(); renderTimeline();
+pollNostr(); pollEsplora();
+setInterval(pollNostr, 30000);
+setInterval(pollEsplora, 60000);
+setInterval(() => { tree.prune(); tree.save(); }, 120000);
+</script>
+</body>
+</html>
