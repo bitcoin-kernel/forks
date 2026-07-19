@@ -60,6 +60,8 @@
     border: 1px solid var(--border); background: var(--stat-box-bg); color: var(--fg); cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #201400; }
   button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:disabled:hover { filter: none; }
   #storage { font-size: .78rem; color: var(--muted); }
   #storage b { color: var(--fg); }
   #storage .sbar { height: 8px; border-radius: 4px; background: #100d1399; overflow: hidden;
@@ -184,6 +186,9 @@ function renderLeague() {
   const inProgress = epochChoice === epochs[0] && tipH < epochChoice * EPOCH + EPOCH - 1;
   const denom = inProgress ? tipH - epochChoice * EPOCH + 1 : EPOCH;
   const denomNote = inProgress ? `blocks mined so far in this epoch (of ${fmt(EPOCH)} when it completes)` : 'blocks in this epoch';
+  const remaining = Math.max(0, denom - covered);
+  $('fill').disabled = !remaining;
+  $('fill').textContent = remaining ? `Scan ${fmt(Math.min(FILL_BATCH, remaining))} more` : 'Fully scanned ✓';
 
   el.innerHTML = `<table class="league"><thead><tr><th class="rank">#</th><th>pool</th><th class="num">blocks</th>
     <th class="num">non-std</th><th class="num">per block</th><th class="share">share</th></tr></thead><tbody>
