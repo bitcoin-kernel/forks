@@ -172,6 +172,12 @@ function renderLeague() {
     .sort((a, b) => b.rate - a.rate || b.ns - a.ns || b.blocks - a.blocks);
   const maxNs = Math.max(1, ...rows.map((r) => r.ns));
   const covered = byEpoch.get(epochChoice).length;
+  // the newest epoch is still being mined: its ceiling is the tip, not 2,016.
+  // Best local tip estimate = highest scanned height (the tip sweep keeps it fresh).
+  const tipH = Math.max(...byEpoch.get(epochChoice).map((e) => e[0]));
+  const inProgress = epochChoice === epochs[0] && tipH < epochChoice * EPOCH + EPOCH - 1;
+  const denom = inProgress ? tipH - epochChoice * EPOCH + 1 : EPOCH;
+  const denomNote = inProgress ? `blocks mined so far in this epoch (of ${fmt(EPOCH)} when it completes)` : 'blocks in this epoch';
 
   el.innerHTML = `<table class="league"><thead><tr><th class="rank">#</th><th>pool</th><th class="num">blocks</th>
     <th class="num">non-std</th><th class="num">per block</th><th class="share">share</th></tr></thead><tbody>
@@ -183,7 +189,7 @@ function renderLeague() {
       <td class="num">${r.rate.toFixed(1)}</td>
       <td class="share"><div class="bar"><i style="width:${(100 * r.ns / maxNs).toFixed(1)}%"></i></div></td>
     </tr>`).join('')}</tbody></table>
-    <p class="h2note" style="margin-top:.6rem">${fmt(covered)} of ${fmt(EPOCH)} blocks in this epoch scanned —
+    <p class="h2note" style="margin-top:.6rem">${fmt(covered)} of ${fmt(denom)} ${denomNote} scanned —
     a sample from your watching, not a census. Higher per-block = the pool's policy admits more oversize datacarrier.</p>`;
 }
 $('pool-epoch').addEventListener('change', (e) => { epochChoice = Number(e.target.value); renderLeague(); });
