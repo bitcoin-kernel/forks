@@ -87,6 +87,10 @@
     Watch page, this is each arm's form guide.</p>
   <div class="row" style="margin:0 0 .8rem"><select id="pool-epoch" style="display:none"></select></div>
   <div id="poolleague"><span class="empty">No blocks scanned yet — new blocks are fetched, verified and classified in the background while this page (or the Watch page) is open.</span></div>
+  <div class="row" id="fillrow" style="display:none; margin-top:.8rem">
+    <button id="fill">Scan 100 more</button>
+    <span class="hint" id="fill-status" style="margin-top:0"></span>
+  </div>
 
   <h2>Witnesses</h2>
   <p class="h2note">Which NIP-333 publishers and relays the Watch page polls (one per line). Explorer witnesses
@@ -137,8 +141,9 @@ function renderLeague() {
   try { led = JSON.parse(localStorage.getItem('forkwatch.classified') || '{}'); } catch {}
   const entries = Object.values(led);
   const el = $('poolleague'), sel = $('pool-epoch');
-  if (!entries.length) { sel.style.display = 'none'; return; }
+  if (!entries.length) { sel.style.display = 'none'; $('fillrow').style.display = 'none'; return; }
   sel.style.display = '';
+  $('fillrow').style.display = '';
 
   const byEpoch = new Map();
   for (const e of entries) {
@@ -212,7 +217,9 @@ scanner.onmessage = (ev) => {
   scanBusy = false;
   scanPending.delete(m.hash);
   if (m.type === 'scanned') { recordScan(m.hash, [m.height, m.pool || null, m.nonStd || 0]); renderLeague(); }
+  if (m.type === 'scanerr' && m.height != null) backfillSkip.add(m.height);
   pumpScan();
+  maybeBackfill();
 };
 function pumpScan() {
   if (!scanReady || scanBusy || !scanQueue.length) return;
@@ -238,6 +245,63 @@ async function sweepTip() {
 }
 sweepTip();
 setInterval(sweepTip, 60000);
+
+// ---- incremental backfill: grow the selected epoch 100 blocks at a time.
+// Heights are resolved to hashes via esplora, then go through the same
+// worker (bytes-hash + PoW verified), one block every ~1.5s so tip scans
+// and the explorers are never crowded. The ledger is the resume state.
+const FILL_BATCH = 100, FILL_GAP = 1500;
+let fillLeft = 0, fillTimer = null;
+const backfillSkip = new Set(); // heights that errored this session — don't retry in a loop
+async function hashAtHeight(h) {
+  for (const base of ['https://mempool.space/api', 'https://blockstream.info/api']) {
+    try {
+      const r = await fetch(`${base}/block-height/${h}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) continue;
+      const t = (await r.text()).trim();
+      if (/^[0-9a-f]{64}$/.test(t)) return t;
+    } catch { /* next source */ }
+  }
+  return null;
+}
+function maybeBackfill() {
+  renderFillUI();
+  if (fillLeft <= 0 || fillTimer || !scanReady || scanBusy || scanQueue.length) return;
+  fillTimer = setTimeout(() => { fillTimer = null; backfillStep(); }, FILL_GAP);
+}
+async function backfillStep() {
+  if (fillLeft <= 0) { renderFillUI(); return; }
+  const led = readLedger(); // fresh — respects blocks another tab scanned meanwhile
+  const heights = new Set(Object.values(led).map((e) => e[0]));
+  const epochs = [...new Set([...heights].map((h) => Math.floor(h / EPOCH)))];
+  const ep = epochs.includes(epochChoice) ? epochChoice : Math.max(...epochs);
+  const lo = ep * EPOCH;
+  // newest epoch: walk down from its highest scanned block (heights above are
+  // the tip sweep's job); an older epoch: walk down from the epoch's top.
+  let h = ep === Math.max(...epochs)
+    ? Math.max(...[...heights].filter((x) => x >= lo && x < lo + EPOCH))
+    : lo + EPOCH - 1;
+  while (h >= lo && (heights.has(h) || backfillSkip.has(h))) h--;
+  if (h < lo) { fillLeft = 0; renderFillUI(); return; } // epoch fully scanned
+  const hash = await hashAtHeight(h);
+  if (!hash) { backfillSkip.add(h); maybeBackfill(); return; }
+  fillLeft--;
+  if (!led[hash] && !scanPending.has(hash)) {
+    scanPending.add(hash);
+    scanQueue.push({ hash, height: h });
+    pumpScan();
+  }
+  maybeBackfill();
+}
+function renderFillUI() {
+  const s = $('fill-status');
+  if (!s) return;
+  s.textContent = fillLeft > 0 ? `backfilling — ${fillLeft} left in this batch…` : '';
+}
+$('fill').addEventListener('click', () => {
+  fillLeft = Math.min(fillLeft + FILL_BATCH, 1000); // stackable, but bounded
+  maybeBackfill();
+});
 
 // ---- witness config ----
 function loadForm() {
