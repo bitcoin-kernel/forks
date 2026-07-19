@@ -48,9 +48,14 @@ async function selectedPair(pc) {
 }
 
 export class MeshCore {
-  constructor({ url, room = '', iceServers, channelLabel = 'data', batch = 4,
+  constructor({ url, room = '', iceServers, channelLabel = 'data', batch = 4, maxPeers = 8,
     onPeer = () => {}, onDrop = () => {}, onData = () => {}, onChange = () => {} }) {
     this.url = url; this.room = room; this.channelLabel = channelLabel; this.batch = batch;
+    // Hard ceilings: RTCPeerConnections are expensive (ICE agents, consent-check
+    // UDP every ~5s, NAT table entries) — a mesh bug must degrade into "stops
+    // growing", never into browser crashes or a flooded home router.
+    this.maxPeers = maxPeers;
+    this._answering = 0; // concurrent answer attempts (each runs a full ICE gather)
     this.iceServers = (iceServers && iceServers.length) ? iceServers : DEFAULT_ICE;
     this.onPeer = onPeer; this.onDrop = onDrop; this.onData = onData; this.onChange = onChange;
     this.peers = new Map();     // signaling id -> { id, pc, ch, pair, inst }
@@ -115,6 +120,7 @@ export class MeshCore {
   }
   async _announce() {
     if (!this.ws || this.ws.readyState !== 1) return;
+    if (this.peers.size >= this.maxPeers) return; // full — don't invite connections we'd only reject
     // a fresh peer floods `batch` offers so several newcomers can each take one;
     // once the mesh has live peers, one standing offer per re-announce still
     // heals partitions and wins races without spinning up `batch` fresh
@@ -136,6 +142,10 @@ export class MeshCore {
   async _onSignal(m) {
     if (m.resource !== this.resource) return;
     if (m.type === 'offer' && m.from && typeof m.sdp === 'string') {
+      // at capacity (or already talking to this id, or churning hard): don't
+      // spin up an ICE gather we'd throw away
+      if (this.peers.size >= this.maxPeers || this.peers.has(m.from) || this._answering >= 4) return;
+      this._answering++;
       try {
         const pc = new RTCPeerConnection({ iceServers: this.iceServers });
         pc.ondatachannel = (ev) => this._adopt(m.from, pc, ev.channel);
@@ -145,7 +155,7 @@ export class MeshCore {
         this._ws({ type: 'answer', resource: this.resource, to: m.from, offer_id: m.offer_id, sdp: pc.localDescription.sdp });
         // if this answer never turns into a registered peer, reap the attempt
         setTimeout(() => { if (this.peers.get(m.from)?.pc !== pc) { try { pc.close(); } catch {} } }, 60_000);
-      } catch {}
+      } catch {} finally { this._answering--; }
     } else if (m.type === 'answer' && m.offer_id && typeof m.sdp === 'string') {
       const pc = this.pending.get(m.offer_id);
       if (!pc) return;
@@ -161,6 +171,10 @@ export class MeshCore {
     ch.bufferedAmountLowThreshold = 256 * 1024;
     const entry = { id, pc, ch, pair: null, inst: null };
     const register = () => {
+      if (!this.peers.has(id) && this.peers.size >= this.maxPeers) { // cap races: full is full
+        try { ch.close(); } catch {} try { pc.close(); } catch {}
+        return;
+      }
       const old = this.peers.get(id);
       if (old && old !== entry) { try { old.ch?.close(); } catch {} try { old.pc.close(); } catch {} } // replaced — don't leak the pc
       this.peers.set(id, entry); this.onPeer(id); this.onChange();
@@ -197,12 +211,14 @@ export class MeshCore {
     if (typeof inst !== 'string' || !inst || this.peers.get(id) !== entry) return;
     entry.inst = inst;
     if (inst === this.instance) return this._reap(id, entry); // a loop back to this very tab
-    // duplicate connections to one tab: only the lexicographically lower
-    // instance acts (deterministic single closer — no mutual-close races),
-    // keeping this newest connection and reaping the rest
+    // duplicate connections to one tab: keep the established connection and
+    // reap the newcomer — churn-free, since the standing link never resets.
+    // Only the lexicographically lower instance acts (deterministic single
+    // closer — no mutual-close races); a zombie survivor clears itself in
+    // seconds via consent checks → connectionstatechange.
     if (this.instance < inst) {
-      for (const [oid, oe] of [...this.peers]) {
-        if (oe !== entry && oe.inst === inst) this._reap(oid, oe);
+      for (const oe of this.peers.values()) {
+        if (oe !== entry && oe.inst === inst) return this._reap(id, entry);
       }
     }
   }
