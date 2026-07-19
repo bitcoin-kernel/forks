@@ -53,7 +53,9 @@ header-tree.js   fork-aware header DAG: PoW-checked inserts, work-weighed best t
 peer-source.js   block·health mesh peer (same wire protocol), vendored from health
                  plus an any-peer fetch extension: tips + headers as witnesses, and
                  scanned blocks pulled from peers' caches before falling back to esplora
-webrtc-mesh.js   vendored verbatim from bitcoin-kernel/health (the canonical copy)
+webrtc-mesh.js   vendored from bitcoin-kernel/health, plus a mesh-hello instance
+                 handshake that dedupes duplicate/self connections when signaling
+                 ids churn (pending upstream sync to health and the webrtc lab)
 engine/          vendored bitcoin-kernel codec + JSON-LD consensus schemas
 tests/           node test suite (regtest chains, real PoW)
 ```

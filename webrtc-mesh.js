@@ -53,8 +53,13 @@ export class MeshCore {
     this.url = url; this.room = room; this.channelLabel = channelLabel; this.batch = batch;
     this.iceServers = (iceServers && iceServers.length) ? iceServers : DEFAULT_ICE;
     this.onPeer = onPeer; this.onDrop = onDrop; this.onData = onData; this.onChange = onChange;
-    this.peers = new Map();     // signaling id -> { id, pc, ch, pair }
+    this.peers = new Map();     // signaling id -> { id, pc, ch, pair, inst }
     this.pending = new Map();   // offer_id -> pc (offers awaiting an answer)
+    // Stable per-tab identity, exchanged as a `mesh-hello` on channel open.
+    // Signaling ids churn (re-announces, tracker reconnects), so without this
+    // the same browser accumulates duplicate live entries under fresh ids —
+    // and a tracker that echoes an announce back even connects a tab to itself.
+    this.instance = rid() + rid();
     this.resource = null; this.ws = null; this.closed = false;
     this.reannounceTimer = null; this.statsTimer = null;
   }
@@ -81,7 +86,7 @@ export class MeshCore {
     return {
       room: this.resource, connected: this.peers.size, ws: this.wsState,
       peers: [...this.peers.values()].map((e) => ({
-        id: e.id, ice: e.pc.iceConnectionState, conn: e.pc.connectionState,
+        id: e.id, inst: e.inst || null, ice: e.pc.iceConnectionState, conn: e.pc.connectionState,
         open: e.ch?.readyState === 'open', path: e.pair?.path || null, rtt: e.pair?.rtt ?? null,
       })),
     };
@@ -154,11 +159,12 @@ export class MeshCore {
   _adopt(id, pc, ch) {
     ch.binaryType = 'arraybuffer';
     ch.bufferedAmountLowThreshold = 256 * 1024;
-    const entry = { id, pc, ch, pair: null };
+    const entry = { id, pc, ch, pair: null, inst: null };
     const register = () => {
       const old = this.peers.get(id);
       if (old && old !== entry) { try { old.ch?.close(); } catch {} try { old.pc.close(); } catch {} } // replaced — don't leak the pc
       this.peers.set(id, entry); this.onPeer(id); this.onChange();
+      try { ch.send(JSON.stringify({ t: 'mesh-hello', inst: this.instance })); } catch {}
     };
     const drop = () => {
       if (this.peers.get(id) === entry) { this.peers.delete(id); this.onDrop(id); this.onChange(); }
@@ -173,8 +179,37 @@ export class MeshCore {
       setTimeout(() => { if (this.peers.get(id)?.pc !== pc) { try { ch.close(); } catch {} try { pc.close(); } catch {} } }, 60_000);
     }
     ch.addEventListener('close', drop);
-    ch.onmessage = (ev) => this.onData(id, ev.data);
+    ch.onmessage = (ev) => {
+      // intercept the mesh-layer hello; everything else is the app's
+      if (typeof ev.data === 'string' && ev.data.length < 200 && ev.data.includes('"mesh-hello"')) {
+        let m = null; try { m = JSON.parse(ev.data); } catch {}
+        if (m && m.t === 'mesh-hello') { this._hello(id, entry, m.inst); return; }
+      }
+      this.onData(id, ev.data);
+    };
     pc.onconnectionstatechange = () => { if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) drop(); };
+  }
+
+  // Instance-identity bookkeeping. Peers that predate mesh-hello simply never
+  // send one (their MeshCore forwards ours to the app, which ignores unknown
+  // message types) — for them behaviour is unchanged.
+  _hello(id, entry, inst) {
+    if (typeof inst !== 'string' || !inst || this.peers.get(id) !== entry) return;
+    entry.inst = inst;
+    if (inst === this.instance) return this._reap(id, entry); // a loop back to this very tab
+    // duplicate connections to one tab: only the lexicographically lower
+    // instance acts (deterministic single closer — no mutual-close races),
+    // keeping this newest connection and reaping the rest
+    if (this.instance < inst) {
+      for (const [oid, oe] of [...this.peers]) {
+        if (oe !== entry && oe.inst === inst) this._reap(oid, oe);
+      }
+    }
+  }
+  _reap(id, e) {
+    if (this.peers.get(id) === e) { this.peers.delete(id); this.onDrop(id); this.onChange(); }
+    try { e.ch?.close(); } catch {}
+    try { e.pc.close(); } catch {}
   }
 
   async _pollStats() {
