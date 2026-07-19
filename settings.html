@@ -117,6 +117,7 @@
     <input type="text" id="sig" spellcheck="false" autocomplete="off" placeholder="wss://your.pod/.webrtc">
     <label for="room">Mesh room</label>
     <input type="text" id="room" spellcheck="false" autocomplete="off" placeholder="b17c0100b10c48ea1710 (hex, 8–128 chars)">
+    <div class="hint" id="peer-status" style="margin-top:.7rem"></div>
 
     <div class="row">
       <button class="primary" id="save">Save</button>
@@ -260,9 +261,23 @@ let mesh = null;
 {
   const w = readCfg().webrtc;
   if (w?.signalUrl) {
-    mesh = new PeerSource({ signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers: iceServersFrom(w), store: null });
+    mesh = new PeerSource({ signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers: iceServersFrom(w), store: null,
+      onStatus: () => renderPeerStatus() });
     mesh.start();
   }
+}
+// health-style live mesh readout in the witness panel
+function renderPeerStatus() {
+  const el = $('peer-status');
+  if (!el) return;
+  if (!readCfg().webrtc?.signalUrl) { el.textContent = 'Mesh disabled — set a signaling server above to pull blocks from peers.'; return; }
+  if (!mesh) { el.textContent = 'Mesh configured — reload this page to join.'; return; }
+  const s = mesh.status();
+  const path = s.peers?.find((p) => p.path)?.path;
+  el.innerHTML = `<b style="color:var(--fg)">${fmt(s.connected || 0)}</b> peer${s.connected === 1 ? '' : 's'} connected · `
+    + `<b style="color:var(--fg)">${fmt(s.received || 0)}</b> block${s.received === 1 ? '' : 's'} pulled`
+    + (path ? ` · via <span style="color:var(--link)">${path}</span>` : '')
+    + ' · <span style="opacity:.65">live</span>';
 }
 async function sweepTip() {
   for (const base of ['https://mempool.space/api', 'https://blockstream.info/api']) {
@@ -413,20 +428,23 @@ $('save').addEventListener('click', () => {
     if (room && /^[a-f0-9]{8,128}$/i.test(room)) cfg.webrtc.room = room.toLowerCase(); else delete cfg.webrtc.room;
   } else delete cfg.webrtc;
   writeCfg(cfg);
+  renderPeerStatus();
   $('saved').classList.add('show'); setTimeout(() => $('saved').classList.remove('show'), 1600);
 });
 $('reset').addEventListener('click', () => {
   localStorage.removeItem('forkwatch.config');
   loadForm();
+  renderPeerStatus();
   $('saved').classList.add('show'); setTimeout(() => $('saved').classList.remove('show'), 1600);
 });
 
 // live refresh while the Watch page scans in another tab
 window.addEventListener('storage', (e) => { if (e.key === 'forkwatch.classified') { renderLeague(); renderStorage(); } });
-setInterval(() => { renderLeague(); renderStorage(); renderFillUI(); }, 5000);
+setInterval(() => { renderLeague(); renderStorage(); renderFillUI(); renderPeerStatus(); }, 5000);
 loadForm();
 renderLeague();
 renderStorage();
+renderPeerStatus();
 </script>
 </body>
 </html>
