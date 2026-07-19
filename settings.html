@@ -60,6 +60,11 @@
     border: 1px solid var(--border); background: var(--stat-box-bg); color: var(--fg); cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #201400; }
   button:hover { filter: brightness(1.08); }
+  #storage { font-size: .78rem; color: var(--muted); }
+  #storage b { color: var(--fg); }
+  #storage .sbar { height: 8px; border-radius: 4px; background: #100d1399; overflow: hidden;
+    box-shadow: inset 0 0 0 1px #ffffff10; margin: .3rem 0 .55rem; }
+  #storage .sbar > i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
   .saved { color: #6fe6a0; font-size: .82rem; opacity: 0; transition: opacity .2s; }
   .saved.show { opacity: 1; }
   .empty { color: var(--muted); font-size: .9rem; padding: .5rem 0; }
@@ -91,6 +96,7 @@
     <button id="fill">Scan 100 more</button>
     <span class="hint" id="fill-status" style="margin-top:0"></span>
   </div>
+  <div id="storage" style="display:none; margin-top:1.1rem"></div>
 
   <h2>Witnesses</h2>
   <p class="h2note">Which NIP-333 publishers and relays the Watch page polls (one per line). Explorer witnesses
@@ -309,6 +315,34 @@ $('fill').addEventListener('click', () => {
   maybeBackfill();
 });
 
+// ---- memory: what the scan ledger costs, and overall browser storage ----
+function human(b) {
+  if (b == null) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1e6) return (b / 1e3).toFixed(0) + ' KB';
+  if (b < 1e9) return (b / 1e6).toFixed(1) + ' MB';
+  return (b / 1e9).toFixed(2) + ' GB';
+}
+async function renderStorage() {
+  const el = $('storage');
+  const raw = localStorage.getItem('forkwatch.classified') || '';
+  const n = raw ? Object.keys(readLedger()).length : 0;
+  if (!n) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  const ledPct = 100 * n / SCAN_CAP;
+  let html = `<div>Scan ledger: <b>${fmt(n)}</b> of <b>${fmt(SCAN_CAP)}</b> blocks · <b>${human(raw.length)}</b>
+    in localStorage — oldest evicted beyond the cap</div>
+    <div class="sbar"><i style="width:${Math.max(0.4, Math.min(100, ledPct)).toFixed(2)}%"></i></div>`;
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    const pct = quota ? (100 * usage / quota) : 0;
+    const pctStr = pct === 0 ? '0' : pct < 0.1 ? '<0.1' : pct.toFixed(pct < 1 ? 1 : 0);
+    html += `<div>Browser storage: <b>${human(usage)}</b> of <b>${human(quota)}</b> (${pctStr}%)</div>
+      <div class="sbar"><i style="width:${Math.max(0.4, Math.min(100, pct)).toFixed(2)}%"></i></div>`;
+  } catch { /* estimate unsupported — ledger line still shows */ }
+  el.innerHTML = html;
+}
+
 // ---- witness config ----
 function loadForm() {
   const cfg = readCfg();
@@ -356,10 +390,11 @@ $('reset').addEventListener('click', () => {
 });
 
 // live refresh while the Watch page scans in another tab
-window.addEventListener('storage', (e) => { if (e.key === 'forkwatch.classified') renderLeague(); });
-setInterval(renderLeague, 5000);
+window.addEventListener('storage', (e) => { if (e.key === 'forkwatch.classified') { renderLeague(); renderStorage(); } });
+setInterval(() => { renderLeague(); renderStorage(); }, 5000);
 loadForm();
 renderLeague();
+renderStorage();
 </script>
 </body>
 </html>
