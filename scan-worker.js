@@ -34,14 +34,19 @@ self.onmessage = async (ev) => {
       self.postMessage({ type: 'ready' });
       return;
     }
-    if (m.type === 'scan') {
+    if (m.type === 'scan' || m.type === 'scanBytes') {
       if (!codec) throw new Error('scanner not initialised');
-      const bytes = await fetchRaw(m.hash);
+      // 'scanBytes': bytes fetched on the main thread (WebRTC peers — no
+      // WebRTC in Workers); verified here identically, so provenance never
+      // lowers the bar. 'scan': fetch from esplora ourselves.
+      const bytes = m.type === 'scanBytes'
+        ? (m.bytes instanceof Uint8Array ? m.bytes : new Uint8Array(m.bytes))
+        : await fetchRaw(m.hash);
       if (bytes.length < 80 || reverseHex(dsha256(bytes.subarray(0, 80))) !== m.hash) throw new Error('bytes do not match requested hash');
       const block = codec.decode('Block', bytesToHex(bytes));
       // self-verify even when the hash came from an explorer, not the PoW-checked tree
       if (!codec.checkProofOfWork(block.header)) throw new Error('header fails proof-of-work');
-      self.postMessage({ type: 'scanned', hash: m.hash, height: m.height, ...scanBlock(block) });
+      self.postMessage({ type: 'scanned', hash: m.hash, height: m.height, via: m.type === 'scanBytes' ? 'peer' : 'esplora', ...scanBlock(block) });
     }
   } catch (e) {
     self.postMessage({ type: 'scanerr', hash: m.hash, height: m.height, error: String(e && e.message || e) });

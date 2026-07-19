@@ -132,6 +132,8 @@
 </div>
 
 <script type="module">
+import { PeerSource, iceServersFrom } from './peer-source.js';
+
 const DEFAULT_PUBLISHERS = ['cccccc0a8338a4aba51691f309f2f892c6c58f655a1ec3fc30522c894c166d9c'];
 const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 const EPOCH = 2016;
@@ -238,10 +240,29 @@ scanner.onmessage = (ev) => {
   pumpScan();
   maybeBackfill();
 };
-function pumpScan() {
+async function pumpScan() {
   if (!scanReady || scanBusy || !scanQueue.length) return;
   scanBusy = true;
-  scanner.postMessage({ type: 'scan', ...scanQueue.shift() });
+  const job = scanQueue.shift();
+  // peers first (verified bytes over WebRTC), esplora as the fallback
+  if (mesh && mesh.status().connected) {
+    try {
+      const bytes = await mesh.requestBlock(job.hash, job.height, 8000, true);
+      if (bytes) { scanner.postMessage({ type: 'scanBytes', ...job, bytes }, [bytes.buffer]); return; }
+    } catch { /* fall through to esplora */ }
+  }
+  scanner.postMessage({ type: 'scan', ...job });
+}
+// mesh: with a signaling server configured, this tab quietly joins the
+// block·health room and pulls scanned blocks from peers' caches — a
+// store-less PeerSource that advertises and serves nothing.
+let mesh = null;
+{
+  const w = readCfg().webrtc;
+  if (w?.signalUrl) {
+    mesh = new PeerSource({ signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers: iceServersFrom(w), store: null });
+    mesh.start();
+  }
 }
 async function sweepTip() {
   for (const base of ['https://mempool.space/api', 'https://blockstream.info/api']) {
@@ -313,7 +334,13 @@ async function backfillStep() {
 function renderFillUI() {
   const s = $('fill-status');
   if (!s) return;
-  s.textContent = fillLeft > 0 ? `backfilling — ${fillLeft} left in this batch…` : '';
+  const parts = [];
+  if (fillLeft > 0) parts.push(`backfilling — ${fillLeft} left in this batch…`);
+  if (mesh) {
+    const st = mesh.status();
+    parts.push(`mesh: ${st.connected} peer${st.connected === 1 ? '' : 's'}${st.received ? ` · ${st.received} block${st.received === 1 ? '' : 's'} via peers` : ''}`);
+  }
+  s.textContent = parts.join(' — ');
 }
 $('fill').addEventListener('click', () => {
   fillLeft = Math.min(fillLeft + FILL_BATCH, 1000); // stackable, but bounded
@@ -396,7 +423,7 @@ $('reset').addEventListener('click', () => {
 
 // live refresh while the Watch page scans in another tab
 window.addEventListener('storage', (e) => { if (e.key === 'forkwatch.classified') { renderLeague(); renderStorage(); } });
-setInterval(() => { renderLeague(); renderStorage(); }, 5000);
+setInterval(() => { renderLeague(); renderStorage(); renderFillUI(); }, 5000);
 loadForm();
 renderLeague();
 renderStorage();

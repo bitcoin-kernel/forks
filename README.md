@@ -50,7 +50,9 @@ nostr so browsers become a decentralized alert network.
 index.html       the app: witnesses, detection, timeline UI
 header-tree.js   fork-aware header DAG: PoW-checked inserts, work-weighed best tip,
                  stale marking, evidence-preserving pruning
-peer-witness.js  silent listener on the block·health mesh (same wire protocol)
+peer-source.js   block·health mesh peer (same wire protocol), vendored from health
+                 plus an any-peer fetch extension: tips + headers as witnesses, and
+                 scanned blocks pulled from peers' caches before falling back to esplora
 webrtc-mesh.js   vendored verbatim from bitcoin-kernel/health (the canonical copy)
 engine/          vendored bitcoin-kernel codec + JSON-LD consensus schemas
 tests/           node test suite (regtest chains, real PoW)

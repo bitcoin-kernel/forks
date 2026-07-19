@@ -118,7 +118,7 @@ import { Codec } from './engine/codec/codec.js';
 import { verifyNostrEvent } from './engine/codec/nostr.js';
 import { HeaderEngine } from './engine/codec/headers.js';
 import { HeaderTree, splitHeaders } from './header-tree.js';
-import { PeerWitness } from './peer-witness.js';
+import { PeerSource } from './peer-source.js';
 
 const DEFAULT_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 const DEFAULT_PUBLISHERS = ['cccccc0a8338a4aba51691f309f2f892c6c58f655a1ec3fc30522c894c166d9c'];
@@ -272,18 +272,22 @@ async function pollEsplora() {
 }
 
 // ---- source 3: mesh witnesses (block·health browsers) ----
+// A store-less PeerSource: same silent-witness role as before (tips + headers
+// in, nothing advertised or served), plus requestBlock — scanned blocks can
+// come from peers' caches instead of an explorer. Headers and blocks are
+// verified locally either way, so a peer earns no more trust than esplora.
 let witness = null;
 if (CFG.webrtc?.signalUrl) {
   const w = CFG.webrtc;
   const iceServers = w.turn
     ? [{ urls: 'stun:stun.l.google.com:19302' }, { urls: w.turn, ...(w.turnUser ? { username: w.turnUser, credential: w.turnCred || '' } : {}) }]
     : undefined;
-  witness = new PeerWitness({
-    signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers,
+  witness = new PeerSource({
+    signalUrl: w.signalUrl, room: w.room || 'b17c0100b10c48ea1710', iceServers, store: null,
     onTip: async (id, tip) => {
       const name = `peer:${String(id).slice(0, 8)}`;
       if (!tree.node(tip.hash)) {
-        const r = await witness.requestHeaders(id, Math.max(0, tip.height - 23), 24);
+        const r = await witness.requestHeaders(Math.max(0, tip.height - 23), 24);
         if (r) ingest(splitHeaders(r.hex), r.start, name);
       }
       noteTip(name, 'peer', tip.height, tip.hash);
@@ -325,10 +329,19 @@ scanner.onmessage = (ev) => {
   if (m.type === 'scanned') { scanLedger[m.hash] = [m.height, m.pool || null, m.nonStd || 0]; saveLedger(); }
   pumpScan();
 };
-function pumpScan() {
+async function pumpScan() {
   if (!scanReady || scanBusy || !scanQueue.length) return;
   scanBusy = true;
-  scanner.postMessage({ type: 'scan', ...scanQueue.shift() });
+  const job = scanQueue.shift();
+  // peers first (verified bytes over WebRTC, no explorer in the path);
+  // esplora only when no peer can serve it
+  if (witness && witness.status().connected) {
+    try {
+      const bytes = await witness.requestBlock(job.hash, job.height, 8000, true);
+      if (bytes) { scanner.postMessage({ type: 'scanBytes', ...job, bytes }, [bytes.buffer]); return; }
+    } catch { /* fall through to esplora */ }
+  }
+  scanner.postMessage({ type: 'scan', ...job });
 }
 // sweep: the newest 24 best-chain blocks not yet scanned
 function sweepScan() {
@@ -382,7 +395,7 @@ function renderSources() {
       <td class="dim">${ago(s.at)}</td>
       <td>${tree.node(s.hash) ? (onBestChain(s.hash) ? '<span class="ok">✓ on best chain</span>' : '<span class="div">✗ divergent</span>') : '<span class="dim">unverified</span>'}</td>
     </tr>`).join('')}</table>`
-    + (witness ? `<p class="dim" style="font-size:.78rem">mesh: ${meshN} peer${meshN === 1 ? '' : 's'} connected</p>` : '');
+    + (witness ? `<p class="dim" style="font-size:.78rem">mesh: ${meshN} peer${meshN === 1 ? '' : 's'} connected${witness.status().received ? ` · ${fmt(witness.status().received)} block${witness.status().received === 1 ? '' : 's'} via peers` : ''}</p>` : '');
 }
 function renderTimeline() {
   if (!events.length) return;
