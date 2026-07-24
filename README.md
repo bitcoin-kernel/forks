@@ -67,3 +67,9 @@ node tests/test-header-tree.mjs
 ```
 
 No build step, no backend — static files on GitHub Pages.
+
+## License
+
+AGPL-3.0-or-later. Copyright © 2026 Melvin Carvalho. See [LICENSE](LICENSE).
+
+Includes vendored code from [bitcoin-kernel](https://github.com/bitcoin-kernel/kernel), also AGPL-3.0.
